@@ -1,41 +1,84 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client';
-import { List, Card, Typography, Button, Form, Input, Select, message } from 'antd';
-import { EditOutlined, DeleteOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons';
+import { List, Card, Typography, Button, Form, Input, Select, message, Space } from 'antd';
+import { EditOutlined, DeleteOutlined, SaveOutlined, CloseOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { Link } from 'react-router-dom';
 import { GET_PEOPLE, GET_CARS, UPDATE_PERSON, UPDATE_CAR, REMOVE_PERSON, REMOVE_CAR } from '../graphql/queries';
 
 const { Text } = Typography;
 const { Option } = Select;
 
 const PeopleList = () => {
-  const { loading: peopleLoading, data: peopleData, refetch: refetchPeople } = useQuery(GET_PEOPLE);
-  const { loading: carsLoading, data: carsData, refetch: refetchCars } = useQuery(GET_CARS);
+  const { loading: peopleLoading, data: peopleData } = useQuery(GET_PEOPLE);
+  const { loading: carsLoading, data: carsData } = useQuery(GET_CARS);
   
   const [removePerson] = useMutation(REMOVE_PERSON, {
+    update(cache, { data: { removePerson } }) {
+      const { people } = cache.readQuery({ query: GET_PEOPLE });
+      cache.writeQuery({
+        query: GET_PEOPLE,
+        data: {
+          people: people.filter(person => person.id !== removePerson.id)
+        }
+      });
+      
+      const { cars } = cache.readQuery({ query: GET_CARS });
+      const updatedCars = cars.filter(car => car.personId !== removePerson.id);
+      cache.writeQuery({
+        query: GET_CARS,
+        data: { cars: updatedCars }
+      });
+    },
     onCompleted: () => {
-      refetchPeople();
-      refetchCars();
       message.success('Person deleted successfully');
     }
   });
   
   const [removeCar] = useMutation(REMOVE_CAR, {
+    update(cache, { data: { removeCar } }) {
+      const { cars } = cache.readQuery({ query: GET_CARS });
+      cache.writeQuery({
+        query: GET_CARS,
+        data: {
+          cars: cars.filter(car => car.id !== removeCar.id)
+        }
+      });
+    },
     onCompleted: () => {
-      refetchCars();
       message.success('Car deleted successfully');
     }
   });
   
   const [updatePerson] = useMutation(UPDATE_PERSON, {
+    update(cache, { data: { updatePerson } }) {
+      const { people } = cache.readQuery({ query: GET_PEOPLE });
+      cache.writeQuery({
+        query: GET_PEOPLE,
+        data: {
+          people: people.map(person => 
+            person.id === updatePerson.id ? updatePerson : person
+          )
+        }
+      });
+    },
     onCompleted: () => {
-      refetchPeople();
       message.success('Person updated successfully');
     }
   });
   
   const [updateCar] = useMutation(UPDATE_CAR, {
+    update(cache, { data: { updateCar } }) {
+      const { cars } = cache.readQuery({ query: GET_CARS });
+      cache.writeQuery({
+        query: GET_CARS,
+        data: {
+          cars: cars.map(car => 
+            car.id === updateCar.id ? updateCar : car
+          )
+        }
+      });
+    },
     onCompleted: () => {
-      refetchCars();
       message.success('Car updated successfully');
     }
   });
@@ -61,13 +104,21 @@ const PeopleList = () => {
 
   const handleDeletePerson = async (id) => {
     if (window.confirm('Are you sure you want to delete this person and all their cars?')) {
-      await removePerson({ variables: { id } });
+      try {
+        await removePerson({ variables: { id } });
+      } catch (error) {
+        message.error(`Error deleting person: ${error.message}`);
+      }
     }
   };
 
   const handleDeleteCar = async (id) => {
     if (window.confirm('Are you sure you want to delete this car?')) {
-      await removeCar({ variables: { id } });
+      try {
+        await removeCar({ variables: { id } });
+      } catch (error) {
+        message.error(`Error deleting car: ${error.message}`);
+      }
     }
   };
 
@@ -98,6 +149,14 @@ const PeopleList = () => {
           id: personId,
           firstName: values.firstName,
           lastName: values.lastName
+        },
+        optimisticResponse: {
+          updatePerson: {
+            __typename: 'Person',
+            id: personId,
+            firstName: values.firstName,
+            lastName: values.lastName
+          }
         }
       });
       setEditingPerson(null);
@@ -117,6 +176,17 @@ const PeopleList = () => {
           model: values.model,
           price: parseFloat(values.price),
           personId: values.personId
+        },
+        optimisticResponse: {
+          updateCar: {
+            __typename: 'Car',
+            id: carId,
+            year: parseInt(values.year),
+            make: values.make,
+            model: values.model,
+            price: parseFloat(values.price),
+            personId: values.personId
+          }
         }
       });
       setEditingCar(null);
@@ -146,12 +216,22 @@ const PeopleList = () => {
                   <Form.Item name="lastName" style={{ flex: 1, marginRight: 8 }}>
                     <Input />
                   </Form.Item>
-                  <Button icon={<SaveOutlined />} onClick={() => handleSavePerson(person.id)} />
-                  <Button icon={<CloseOutlined />} onClick={handleCancelEdit} style={{ marginLeft: 8 }} />
+                  <Button 
+                    icon={<SaveOutlined />} 
+                    onClick={() => handleSavePerson(person.id)}
+                    type="primary"
+                  />
+                  <Button 
+                    icon={<CloseOutlined />} 
+                    onClick={handleCancelEdit} 
+                    style={{ marginLeft: 8 }}
+                  />
                 </Form>
               ) : (
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{person.firstName} {person.lastName}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '16px', fontWeight: '500' }}>
+                    {person.firstName} {person.lastName}
+                  </span>
                   <div>
                     <Button 
                       icon={<EditOutlined />} 
@@ -167,58 +247,83 @@ const PeopleList = () => {
                 </div>
               )
             }
+            extra={
+              <Link to={`/people/${person.id}`}>
+                <Button type="link" icon={<InfoCircleOutlined />}>
+                  LEARN MORE
+                </Button>
+              </Link>
+            }
           >
-            {getCarsByPersonId(person.id).map(car => (
-              <div key={car.id} style={{ marginBottom: 8 }}>
-                {editingCar === car.id ? (
-                  <Form form={carForm} layout="inline" style={{ width: '100%' }}>
-                    <Form.Item name="year" style={{ width: 80, marginRight: 8 }}>
-                      <Input type="number" />
-                    </Form.Item>
-                    <Form.Item name="make" style={{ width: 100, marginRight: 8 }}>
-                      <Input />
-                    </Form.Item>
-                    <Form.Item name="model" style={{ width: 100, marginRight: 8 }}>
-                      <Input />
-                    </Form.Item>
-                    <Form.Item name="price" style={{ width: 100, marginRight: 8 }}>
-                      <Input type="number" step="0.01" />
-                    </Form.Item>
-                    <Form.Item name="personId" style={{ width: 150, marginRight: 8 }}>
-                      <Select>
-                        {peopleData.people.map(p => (
-                          <Option key={p.id} value={p.id}>
-                            {p.firstName} {p.lastName}
-                          </Option>
-                        ))}
-                      </Select>
-                    </Form.Item>
-                    <Button icon={<SaveOutlined />} onClick={() => handleSaveCar(car.id)} />
-                    <Button icon={<CloseOutlined />} onClick={handleCancelEdit} style={{ marginLeft: 8 }} />
-                  </Form>
-                ) : (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text strong>
-                      {car.year} {car.make} {car.model} - {formatPrice(car.price)}
-                    </Text>
-                    <div>
-                      <Button 
-                        icon={<EditOutlined />} 
-                        size="small" 
-                        onClick={() => handleEditCar(car)}
-                        style={{ marginRight: 8 }}
-                      />
-                      <Button 
-                        icon={<DeleteOutlined />} 
-                        size="small" 
-                        onClick={() => handleDeleteCar(car.id)}
-                        danger
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
+            <Card
+              title="Cars Owned"
+              type="inner"
+              bodyStyle={{ padding: 0 }}
+            >
+              {getCarsByPersonId(person.id).length > 0 ? (
+                <List
+                  dataSource={getCarsByPersonId(person.id)}
+                  renderItem={car => (
+                    <List.Item>
+                      {editingCar === car.id ? (
+                        <Form form={carForm} layout="inline" style={{ width: '100%' }}>
+                          <Form.Item name="year" style={{ width: 80, marginRight: 8 }}>
+                            <Input type="number" placeholder="Year" />
+                          </Form.Item>
+                          <Form.Item name="make" style={{ width: 100, marginRight: 8 }}>
+                            <Input placeholder="Make" />
+                          </Form.Item>
+                          <Form.Item name="model" style={{ width: 100, marginRight: 8 }}>
+                            <Input placeholder="Model" />
+                          </Form.Item>
+                          <Form.Item name="price" style={{ width: 100, marginRight: 8 }}>
+                            <Input type="number" step="0.01" placeholder="Price" />
+                          </Form.Item>
+                          <Form.Item name="personId" style={{ width: 150, marginRight: 8 }}>
+                            <Select placeholder="Owner">
+                              {peopleData.people.map(p => (
+                                <Option key={p.id} value={p.id}>
+                                  {p.firstName} {p.lastName}
+                                </Option>
+                              ))}
+                            </Select>
+                          </Form.Item>
+                          <Space>
+                            <Button 
+                              icon={<SaveOutlined />} 
+                              onClick={() => handleSaveCar(car.id)}
+                              type="primary"
+                            />
+                            <Button 
+                              icon={<CloseOutlined />} 
+                              onClick={handleCancelEdit} 
+                            />
+                          </Space>
+                        </Form>
+                      ) : (
+                        <Card
+                          size="small"
+                          style={{ width: '100%' }}
+                          actions={[
+                            <EditOutlined key="edit" onClick={() => handleEditCar(car)} />,
+                            <DeleteOutlined key="delete" onClick={() => handleDeleteCar(car.id)} />
+                          ]}
+                        >
+                          <Card.Meta
+                            title={`${car.year} ${car.make} ${car.model}`}
+                            description={formatPrice(car.price)}
+                          />
+                        </Card>
+                      )}
+                    </List.Item>
+                  )}
+                />
+              ) : (
+                <div style={{ padding: '16px', textAlign: 'center' }}>
+                  <Text type="secondary">No cars owned</Text>
+                </div>
+              )}
+            </Card>
           </Card>
         </List.Item>
       )}
