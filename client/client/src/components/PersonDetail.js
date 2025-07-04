@@ -8,7 +8,7 @@ import { GET_PERSON_WITH_CARS } from '../graphql/queries';
 const { Title, Text } = Typography;
 
 const PersonDetail = () => {
-  const { id } = useParams(); // This now properly gets the ID from the URL
+  const { id } = useParams(); 
   const { loading, error, data } = useQuery(GET_PERSON_WITH_CARS, {
     variables: { id }
   });
